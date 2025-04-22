@@ -1,0 +1,93 @@
+name: Website Security & Performance Scan
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  scan:
+    if: contains(github.event.issue.body, '/scan ')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract URL from issue
+        id: extract
+        run: |
+          echo "ISSUE_BODY<<EOF" >> $GITHUB_ENV
+          echo "${{ github.event.issue.body }}" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          url=$(echo "${{ github.event.issue.body }}" | grep -oP '(?<=/scan )https?://\S+')
+          echo "url=$url" >> $GITHUB_OUTPUT
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Create scan folder
+        run: |
+          export SCAN_DATE=$(date +%F)
+          mkdir -p scans/$SCAN_DATE
+          echo "SCAN_DATE=$SCAN_DATE" >> $GITHUB_ENV
+
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.11.0
+        with:
+          target: ${{ steps.extract.outputs.url }}
+          artifact_name: zap-report
+          docker_name: 'ghcr.io/zaproxy/zap-baseline'
+        continue-on-error: true
+
+      - name: Save ZAP HTML report
+        run: |
+          mv zap-report.html scans/${{ env.SCAN_DATE }}/zap-report.html
+
+      - name: Run is-website-vulnerable
+        run: |
+          npx is-website-vulnerable ${{ steps.extract.outputs.url }} > scans/${{ env.SCAN_DATE }}/vulnerable.json
+        continue-on-error: true
+
+      - name: Run Lighthouse Check
+        run: |
+          npm install -g lighthouse
+          lighthouse ${{ steps.extract.outputs.url }} --output html --output-path scans/${{ env.SCAN_DATE }}/lighthouse-report.html || true
+
+      - name: Create combined report
+        run: |
+          echo "# Combined Report for ${{ steps.extract.outputs.url }}" > scans/${{ env.SCAN_DATE }}/combined-report.md
+          echo "Date: $(date)" >> scans/${{ env.SCAN_DATE }}/combined-report.md
+          echo "- [ZAP Report](./zap-report.html)" >> scans/${{ env.SCAN_DATE }}/combined-report.md
+          echo "- [Lighthouse Report](./lighthouse-report.html)" >> scans/${{ env.SCAN_DATE }}/combined-report.md
+          echo "- [is-website-vulnerable](./vulnerable.json)" >> scans/${{ env.SCAN_DATE }}/combined-report.md
+
+      - name: Commit and push results
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git add scans/
+          git commit -m "Add scan results for ${{ steps.extract.outputs.url }}"
+          git push
+
+      - name: Comment on issue with results
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.issue.number;
+            const date = new Date().toISOString().split('T')[0];
+            const url = '${{ steps.extract.outputs.url }}';
+            const body = `
+              ### 🔍 Scan Complete for ${url}
+              **Date:** ${date}
+              
+              **Reports:**
+              - [ZAP Security Report](https://github.com/${{ github.repository }}/blob/main/scans/${date}/zap-report.html)
+              - [Lighthouse Performance Report](https://github.com/${{ github.repository }}/blob/main/scans/${date}/lighthouse-report.html)
+              - [is-website-vulnerable JSON](https://github.com/${{ github.repository }}/blob/main/scans/${date}/vulnerable.json)
+              - [Combined Report](https://github.com/${{ github.repository }}/blob/main/scans/${date}/combined-report.md)
+              `;
+
+            await github.rest.issues.createComment({
+              issue_number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
