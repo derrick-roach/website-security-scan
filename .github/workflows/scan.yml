@@ -29,11 +29,27 @@ jobs:
           echo "SCAN_DATE=$SCAN_DATE" >> $GITHUB_ENV
 
       - name: Run ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.11.0
+        uses: zaproxy/action-baseline@v0.14.0
         with:
+          # GitHub Token to create issues in the repository
+          # token: ${{ secrets.GITHUB_TOKEN }} # optional, default is ${{ github.token }}
+          # Target URL
           target: ${{ steps.extract.outputs.url }}
-          artifact_name: zap-report
-          docker_name: 'ghcr.io/zaproxy/zap-baseline'
+          # Relative path of the ZAP configuration file
+          # rules_file_name: # optional
+          # The Docker file to be executed
+          # docker_name: 'owasp/zap2docker-stable' # default is owasp/zap2docker-stable
+          # Additional command line options
+          # cmd_options: '-r zap-report-${{ env.NOW }}.html' # optional
+          # The title for the GitHub issue to be created
+          # issue_title: ZAP Report - ${{ env.NOW }} # optional, default is ZAP Scan Baseline Report
+          # The action status will be set to fail if ZAP identifies any alerts during the baseline scan
+          fail_action: false # optional
+          # The action will file the report to the GitHub issue using the issue_title input
+          # allow_issue_writing: false # optional, default is true
+          # The action will attach the report to the build with the name zap_scan. 
+          # Set artifact_name to a different string to name it something else.
+          artifact_name: 'zap-report' # optional, default is zap_scan
         continue-on-error: true
 
       - name: Save ZAP HTML report
